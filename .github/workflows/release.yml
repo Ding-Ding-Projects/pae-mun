@@ -23,6 +23,7 @@ on:
         default: all
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -201,6 +202,7 @@ jobs:
       PRIVATE_RELEASE_TOKEN: ${{ secrets[format('PRIVATE_RELEASE_TOKEN_{0}', matrix.project.secret_suffix)] || secrets.PRIVATE_RELEASE_TOKEN }}
       TARGET_RELEASE_REPO: ${{ secrets[format('RELEASE_TARGET_{0}', matrix.project.secret_suffix)] }}
       STATUS_DISCUSSION_ID: ${{ secrets[format('STATUS_DISCUSSION_ID_{0}', matrix.project.secret_suffix)] }}
+      WORKFLOW_API_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.ORG_TOKEN || secrets.GITHUB_TOKEN }}
       PROJECT_ID: ${{ matrix.project.id }}
       PROJECT_REV: ${{ matrix.project.rev }}
     steps:
@@ -239,6 +241,63 @@ jobs:
           $publishOutput = gh release edit $tag --repo $env:TARGET_RELEASE_REPO --draft=false --latest 2>&1
           if ($LASTEXITCODE -ne 0) { throw "release publish failed: $tag" }
           Write-Host "published: $tag"
+
+      - name: Attach measured workflow timing
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:EPB_RELEASE_TAG)) { throw 'release tag was not recorded' }
+          if ([string]::IsNullOrWhiteSpace($env:WORKFLOW_API_TOKEN)) { throw 'workflow API credential unavailable' }
+          $env:GH_TOKEN = $env:WORKFLOW_API_TOKEN
+          $jobsRaw = @(gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID/jobs?per_page=100" 2>&1 |
+            ForEach-Object { "$_" })
+          if ($LASTEXITCODE -ne 0) { throw 'workflow job timing lookup failed' }
+          try { $jobsDocument = (($jobsRaw -join [Environment]::NewLine) | ConvertFrom-Json) }
+          catch { throw 'workflow job timing response was invalid' }
+          $jobs = @($jobsDocument.jobs)
+          $firstJob = @($jobs |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_.started_at) } |
+            Sort-Object { [DateTimeOffset]::Parse($_.started_at) } |
+            Select-Object -First 1)
+          $releaseJob = @($jobs |
+            Where-Object { $_.name -like "release-$env:PROJECT_ID*" } |
+            Select-Object -First 1)
+          $publicationStep = @($releaseJob.steps |
+            Where-Object { $_.name -eq 'Publish private release' -and -not [string]::IsNullOrWhiteSpace($_.completed_at) } |
+            Select-Object -Last 1)
+          if ($firstJob.Count -eq 0 -or $releaseJob.Count -eq 0 -or $publicationStep.Count -eq 0) {
+            throw 'workflow timing evidence is incomplete'
+          }
+          try {
+            $startedAt = ([DateTimeOffset]::Parse($firstJob[0].started_at)).ToUniversalTime()
+            $completedAt = ([DateTimeOffset]::Parse($publicationStep[0].completed_at)).ToUniversalTime()
+          } catch { throw 'workflow timing evidence contains invalid timestamps' }
+          $duration = $completedAt - $startedAt
+          if ($duration.TotalSeconds -lt 0) { throw 'workflow timing evidence is reversed' }
+          $durationText = '{0:00}:{1:00}:{2:00}' -f [int][Math]::Floor($duration.TotalHours), $duration.Minutes, $duration.Seconds
+
+          $env:GH_TOKEN = $env:PRIVATE_RELEASE_TOKEN
+          $releaseRaw = @(gh release view $env:EPB_RELEASE_TAG --repo $env:TARGET_RELEASE_REPO --json body 2>&1 |
+            ForEach-Object { "$_" })
+          if ($LASTEXITCODE -ne 0) { throw 'private release notes lookup failed' }
+          try { $release = (($releaseRaw -join [Environment]::NewLine) | ConvertFrom-Json) }
+          catch { throw 'private release notes response was invalid' }
+          $marker = '<!-- epb-workflow-timing:v1 -->'
+          $existingBody = [string]$release.body
+          $existingBody = [regex]::Replace($existingBody, '(?s)\r?\n?<!-- epb-workflow-timing:v1 -->.*$', '').TrimEnd()
+          $timing = @(
+            $marker
+            '### Workflow timing / 流程時間'
+            ''
+            "- Workflow started / 流程開始: $($startedAt.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'"))"
+            "- Workflow completed / 流程完成: $($completedAt.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'"))"
+            "- Workflow duration / 流程用時: ``$durationText``"
+            '- Measured from the first job `startedAt` to the completed `Publish private release` step.'
+            '- 由第一個工作嘅 `startedAt` 計到完成 `Publish private release` 步驟，唔係估時間。'
+          ) -join "`n"
+          $updatedBody = if ([string]::IsNullOrWhiteSpace($existingBody)) { $timing } else { "$existingBody`n`n$timing" }
+          $editRaw = @(gh release edit $env:EPB_RELEASE_TAG --repo $env:TARGET_RELEASE_REPO --notes $updatedBody 2>&1 |
+            ForEach-Object { "$_" })
+          if ($LASTEXITCODE -ne 0) { throw 'private release timing update failed' }
+          Write-Host "Workflow timing recorded: $($startedAt.ToString('o')) -> $($completedAt.ToString('o')) ($durationText)."
 
       - name: Append release terminal to private Discussion
         if: always()
