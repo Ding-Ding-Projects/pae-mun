@@ -203,6 +203,7 @@ jobs:
       WORKFLOW_API_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.ORG_TOKEN || secrets.GITHUB_TOKEN }}
       PROJECT_ID: ${{ matrix.project.id }}
       PROJECT_REV: ${{ matrix.project.rev }}
+      BUILDER_SHA: ${{ github.sha }}
     steps:
       - uses: actions/checkout@v4
 
@@ -213,6 +214,8 @@ jobs:
             -DiscussionId $env:STATUS_DISCUSSION_ID `
             -ProjectId $env:PROJECT_ID `
             -Revision $env:PROJECT_REV `
+            -BuilderSha $env:BUILDER_SHA `
+            -JobName "release-$env:PROJECT_ID" `
             -Workflow release `
             -Status in_progress
 
@@ -305,6 +308,8 @@ jobs:
             -DiscussionId $env:STATUS_DISCUSSION_ID `
             -ProjectId $env:PROJECT_ID `
             -Revision $env:PROJECT_REV `
+            -BuilderSha $env:BUILDER_SHA `
+            -JobName "release-$env:PROJECT_ID" `
             -Workflow release `
             -Status completed `
             -Conclusion '${{ job.status }}' `
@@ -326,6 +331,7 @@ jobs:
       STATUS_DISCUSSION_ID: ${{ secrets[format('STATUS_DISCUSSION_ID_{0}', matrix.project.secret_suffix)] }}
       PROJECT_ID: ${{ matrix.project.id }}
       PROJECT_REV: ${{ matrix.project.rev }}
+      BUILDER_SHA: ${{ github.sha }}
     steps:
       - uses: actions/checkout@v4
 
@@ -337,6 +343,8 @@ jobs:
             -DiscussionId $env:STATUS_DISCUSSION_ID `
             -ProjectId $env:PROJECT_ID `
             -Revision $env:PROJECT_REV `
+            -BuilderSha $env:BUILDER_SHA `
+            -JobName "release-$env:PROJECT_ID" `
             -Workflow release `
             -Status skipped `
             -Conclusion '${{ needs.build.result }}'
