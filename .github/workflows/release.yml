@@ -71,8 +71,6 @@ jobs:
       PRIVATE_RELEASE_TOKEN: ${{ secrets[format('PRIVATE_RELEASE_TOKEN_{0}', matrix.project.secret_suffix)] || secrets.PRIVATE_RELEASE_TOKEN }}
       TARGET_RELEASE_REPO: ${{ secrets[format('RELEASE_TARGET_{0}', matrix.project.secret_suffix)] }}
       STATUS_DISCUSSION_ID: ${{ secrets[format('STATUS_DISCUSSION_ID_{0}', matrix.project.secret_suffix)] }}
-      EPB_WINDOWS_CERTIFICATE_BASE64: ${{ secrets[format('WINDOWS_CERTIFICATE_BASE64_{0}', matrix.project.secret_suffix)] }}
-      EPB_WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets[format('WINDOWS_CERTIFICATE_PASSWORD_{0}', matrix.project.secret_suffix)] }}
       PROJECT_ID: ${{ matrix.project.id }}
       PROJECT_REV: ${{ matrix.project.rev }}
       BUILDER_SHA: ${{ github.sha }}
