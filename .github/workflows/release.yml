@@ -147,11 +147,25 @@ jobs:
         run: |
           $script = "workflows/$env:PROJECT_ID.ps1"
           if (-not (Test-Path -LiteralPath $script)) { throw "Missing project body: $script" }
+          $buildLog = Join-Path $env:RUNNER_TEMP 'epb-project-body.log'
+          $safePhase = 'unknown'
+          function Read-SafePhase {
+            if (-not (Test-Path -LiteralPath $buildLog)) { return 'unknown' }
+            $marker = Get-Content -LiteralPath $buildLog -ErrorAction SilentlyContinue |
+              Select-String -Pattern '^EPB_SAFE_PHASE=[A-Za-z0-9_-]+$' |
+              Select-Object -Last 1
+            if ($marker) { return ($marker.Line -replace '^EPB_SAFE_PHASE=', '') }
+            return 'unknown'
+          }
           try {
-            & $script *> $null
+            & $script *> $buildLog
+            $safePhase = Read-SafePhase
             if ($LASTEXITCODE -ne 0) { throw 'opaque project body returned a failure code' }
           } catch {
-            throw 'Opaque project build phase failed.'
+            $safePhase = Read-SafePhase
+            throw "Opaque project build phase failed at safe phase '$safePhase'."
+          } finally {
+            Remove-Item -LiteralPath $buildLog -Force -ErrorAction SilentlyContinue
           }
 
       - name: Append build terminal to private Discussion
